@@ -7,6 +7,275 @@
 
 ---
 
+## Migration Overview & Agenda
+
+### Executive Summary
+
+This runbook guides you through migrating a **Single-Zone Confluent Cloud Dedicated cluster** to a **Multi-Zone Enterprise cluster** using **Cluster Linking**. The migration achieves near-zero downtime (<5 minutes consumer interruption), zero data loss, and automatic consumer offset preservation.
+
+**Business Outcomes:**
+- 🎯 **Availability**: 99.5% → 99.99% uptime
+- 🛡️ **Resilience**: Survive complete availability zone failures
+- 📊 **Durability**: RF=1/2 → RF=3 with cross-zone replication
+- ⚡ **Downtime**: <5 minutes (consumer restart only)
+
+---
+
+### Migration Timeline
+
+**Total Duration**: ~10 weeks (for typical 100TB cluster, 500 topics)
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    MIGRATION PHASES                          │
+└─────────────────────────────────────────────────────────────┘
+
+Week 1-2   │ Pre-Migration Assessment
+           │ • Inventory topics, consumers, connectors
+           │ • Analyze traffic patterns and dependencies
+           │ • Capacity planning and risk assessment
+           │
+Week 3     │ Architecture Design & Staging
+           │ • Design target multi-zone architecture
+           │ • Staging environment rehearsal
+           │ • Network setup (VPC peering/PrivateLink)
+           │
+Week 4     │ Target Cluster Provisioning
+           │ • Provision Multi-AZ Enterprise cluster
+           │ • Configure networking and security
+           │ • Create service accounts and API keys
+           │
+Week 4-5   │ Cluster Linking & Replication Sync
+           │ • Establish Cluster Link (source → destination)
+           │ • Create mirror topics
+           │ • Monitor replication lag (10M messages → 0)
+           │
+Week 6     │ Production Cutover (4-hour window)
+           │ • Migrate producers (phased rollout)
+           │ • Migrate consumers (offset translation)
+           │ • Reconfigure Kafka Connect
+           │
+Week 6-8   │ Validation & Monitoring
+           │ • 24/7 monitoring period
+           │ • Performance tuning
+           │ • Data integrity validation
+           │
+Week 10    │ Decommission
+           │ • Delete Cluster Link
+           │ • Delete source cluster
+           │ • Final documentation update
+```
+
+---
+
+### High-Level Migration Steps
+
+#### **Phase 1: Pre-Migration (Weeks 1-2)** 📋
+**Objective**: Understand current state and plan migration
+
+1. **Inventory & Assessment**
+   - Topic configurations (partitions, RF, retention)
+   - Consumer groups and lag analysis
+   - Producer/consumer patterns
+   - Dependencies (Schema Registry, Connect, ksqlDB)
+
+2. **Risk & Capacity Planning**
+   - Identify single points of failure
+   - Calculate target cluster capacity
+   - Security audit (ACLs, API keys)
+   - Define rollback triggers
+
+**Deliverable**: Complete inventory spreadsheet, risk assessment
+
+---
+
+#### **Phase 2: Architecture & Design (Week 3)** 🏗️
+**Objective**: Design target state and validate approach
+
+1. **Target Architecture Design**
+   - Multi-zone cluster topology
+   - Replication factor strategy (RF=3)
+   - Network design (VPC peering vs PrivateLink)
+   - Security architecture (ACLs, TLS, encryption)
+
+2. **Staging Rehearsal**
+   - Execute full migration in staging environment
+   - Measure cutover timing
+   - Test rollback procedure
+   - Document lessons learned
+
+**Deliverable**: Architecture diagrams, staging validation report
+
+---
+
+#### **Phase 3: Infrastructure Provisioning (Week 4)** ⚙️
+**Objective**: Prepare destination cluster and networking
+
+1. **Provision Multi-AZ Cluster**
+   - Create Enterprise cluster (3 availability zones)
+   - Configure cluster-level settings
+   - Validate provisioning
+
+2. **Network & Security Setup**
+   - Establish VPC peering or PrivateLink
+   - Configure security groups and route tables
+   - Create service accounts and API keys
+   - Replicate ACLs/RBAC policies
+
+**Deliverable**: Operational multi-zone cluster, network connectivity validated
+
+---
+
+#### **Phase 4: Cluster Linking Setup (Weeks 4-5)** 🔗
+**Objective**: Establish replication from source to destination
+
+1. **Create Cluster Link**
+   - Configure Cluster Link (destination → source)
+   - Enable consumer offset sync
+   - Enable ACL sync
+
+2. **Create Mirror Topics**
+   - Mirror all production topics
+   - Validate configuration sync
+   - Monitor replication lag
+
+3. **Replication Sync (5-7 days)**
+   - Wait for lag to reach near-zero
+   - Monitor continuously
+   - Validate offset translation
+
+**Cutover Readiness Criteria**:
+- ✅ Mirror lag < 1000 messages (all topics)
+- ✅ Lag stable for 30+ minutes
+- ✅ Consumer offset sync functional
+- ✅ No errors in Cluster Link state
+
+**Deliverable**: Fully synchronized destination cluster
+
+---
+
+#### **Phase 5: Application Migration (Week 6)** 🚀
+**Objective**: Switch traffic to destination cluster
+
+**Cutover Window**: 4 hours (actual execution ~30 minutes)
+
+1. **Producer Migration** (Rolling, Zero Downtime)
+   - Canary rollout (5% → 25% → 50% → 100%)
+   - Update bootstrap servers and API keys
+   - Validate traffic switch
+
+2. **Consumer Migration** (<5 min downtime)
+   - Graceful shutdown on source
+   - Validate offset translation
+   - Start consumers on destination
+   - Resume from exact offset
+
+3. **Kafka Connect Migration**
+   - Pause connectors
+   - Reconfigure bootstrap servers
+   - Resume connectors
+   - Validate data flow
+
+**Deliverable**: All traffic on destination cluster, zero data loss
+
+---
+
+#### **Phase 6: Validation & Testing (Weeks 6-8)** ✅
+**Objective**: Confirm migration success and stability
+
+1. **Data Integrity Validation**
+   - Compare message counts (source vs destination)
+   - Validate consumer offsets
+   - Schema Registry compatibility check
+
+2. **Performance Validation**
+   - Throughput benchmarks
+   - Latency measurements
+   - Consumer lag analysis
+   - Failover testing (zone failure simulation)
+
+3. **Monitoring Period**
+   - 24/7 monitoring for 2 weeks
+   - Performance tuning
+   - Issue resolution
+
+**Deliverable**: Validated production cluster, performance report
+
+---
+
+#### **Phase 7: Rollback Plan** 🔄
+**Objective**: Revert to source cluster if critical issues arise
+
+**Rollback Triggers**:
+- Data loss detected (>1% message count mismatch)
+- Producer error rate >5%
+- Consumer lag uncontrollable
+- Authentication failures affecting >10% of clients
+
+**Rollback Procedure** (Target: <15 minutes):
+1. Stop destination traffic
+2. Revert producer/consumer configs to source
+3. Restart on source cluster
+4. Validate source cluster operational
+
+**Note**: Cluster Link remains active for 7-14 days as safety net
+
+---
+
+#### **Phase 8: Post-Migration (Week 10)** 🎯
+**Objective**: Optimize and decommission old infrastructure
+
+1. **Decommission Source Cluster**
+   - Wait 7-14 days for validation
+   - Delete Cluster Link
+   - Delete source cluster
+   - Clean up networking resources
+
+2. **Optimization**
+   - Right-size cluster (CKU tuning)
+   - Optimize retention policies
+   - Enable tiered storage
+   - Cost optimization (compression, batching)
+
+**Deliverable**: Optimized production multi-zone cluster
+
+---
+
+#### **Phase 9: Common Pitfalls & Best Practices** ⚠️
+
+**Top 5 Pitfalls to Avoid**:
+1. **Incorrect Offset Translation** → Validate ALL consumer groups before cutover
+2. **ACL Mismatches** → Enable ACL sync, diff before and after
+3. **Latency Degradation** → Tune producer batching for cross-zone
+4. **Under-Partitioned Topics** → Increase partitions before migration
+5. **Skipped Staging Test** → ALWAYS rehearse in staging first
+
+**Best Practices**:
+- Use phased producer rollout (5% → 100%)
+- Monitor replication lag continuously
+- Keep Cluster Link active 7-14 days post-cutover
+- Test rollback procedure in staging
+- Freeze schema changes during cutover window
+
+---
+
+### Appendices
+
+**Appendix A**: Command Reference (Confluent CLI, Kafka CLI)  
+**Appendix B**: Troubleshooting Guide (common failures and resolutions)  
+**Appendix C**: Migration Timeline Template (Excel/spreadsheet)
+
+---
+
+### Document Usage
+
+**👨‍💼 For Executives**: Read Migration Overview & Timeline  
+**🏗️ For Architects**: Focus on Phases 2-3 (Architecture & Design)  
+**👨‍💻 For Implementation Teams**: Follow Phases 1-8 sequentially  
+**🚨 For Incident Response**: Jump to Phase 7 (Rollback Plan)
+
+---
+
 ## 1. Pre-Migration Assessment
 
 ### 1.1 Topic Inventory
