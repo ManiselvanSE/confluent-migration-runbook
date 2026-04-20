@@ -48,3 +48,6 @@ divergent-messages.txt
 source-offsets-*.txt
 dest-offsets-*.txt
 topics-inventory.txt
+
+# Claude Code project files
+.claude/
